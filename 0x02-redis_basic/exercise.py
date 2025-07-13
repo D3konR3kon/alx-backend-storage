@@ -8,6 +8,38 @@ from typing import Union, Callable, Optional, Any
 from functools import wraps
 
 
+def call_history(method: Callable) -> Callable:
+    """
+    Decorator that stores the history of inputs and outputs for a function
+    
+    Args:
+        method: The method to be decorated
+        
+    Returns:
+        The wrapped method that stores input/output history in Redis lists
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        """
+        Wrapper function that stores input/output history and calls the original method
+        """
+        # Create keys for input and output lists
+        input_key = f"{method.__qualname__}:inputs"
+        output_key = f"{method.__qualname__}:outputs"
+        
+        # Store input arguments in Redis list (normalize to string)
+        self._redis.rpush(input_key, str(args))
+        
+        # Execute the original method to get the output
+        output = method(self, *args, **kwargs)
+        
+        # Store output in Redis list
+        self._redis.rpush(output_key, output)
+        
+        return output
+    return wrapper
+
+
 def count_calls(method: Callable) -> Callable:
     """
     Decorator that counts how many times a method is called
@@ -40,6 +72,7 @@ class Cache:
         self._redis = redis.Redis()
         self._redis.flushdb()
     
+    @call_history
     @count_calls
     def store(self, data: Union[str, bytes, int, float]) -> str:
         """
