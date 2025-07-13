@@ -8,6 +8,48 @@ from typing import Union, Callable, Optional, Any
 from functools import wraps
 
 
+def replay(method: Callable) -> None:
+    """
+    Display the history of calls of a particular function
+    
+    Args:
+        method: The method to display call history for
+    """
+    # Get the Redis instance from the method's class (assuming it's a Cache method)
+    # We need to access the Redis instance through the method's class
+    redis_instance = method.__self__._redis
+    
+    # Generate keys for count, inputs, and outputs
+    method_name = method.__qualname__
+    count_key = method_name
+    inputs_key = f"{method_name}:inputs"
+    outputs_key = f"{method_name}:outputs"
+    
+    # Get the call count
+    count = redis_instance.get(count_key)
+    if count is None:
+        count = 0
+    else:
+        count = int(count)
+    
+    # Get the inputs and outputs history
+    inputs = redis_instance.lrange(inputs_key, 0, -1)
+    outputs = redis_instance.lrange(outputs_key, 0, -1)
+    
+    # Display the summary
+    print(f"{method_name} was called {count} times:")
+    
+    # Display each call with its input and output
+    for input_args, output in zip(inputs, outputs):
+        # Decode bytes to string if needed
+        if isinstance(input_args, bytes):
+            input_args = input_args.decode('utf-8')
+        if isinstance(output, bytes):
+            output = output.decode('utf-8')
+        
+        print(f"{method_name}(*{input_args}) -> {output}")
+
+
 def call_history(method: Callable) -> Callable:
     """
     Decorator that stores the history of inputs and outputs for a function
