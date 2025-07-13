@@ -4,7 +4,7 @@ Redis Cache implementation
 """
 import redis
 import uuid
-from typing import Union
+from typing import Union, Callable, Optional, Any
 
 
 class Cache:
@@ -28,3 +28,45 @@ class Cache:
         key = str(uuid.uuid4())
         self._redis.set(key, data)
         return key
+    
+    def get(self, key: str, fn: Optional[Callable] = None) -> Any:
+        """
+        Get data from Redis and optionally convert it using fn
+        
+        Args:
+            key: The key to retrieve from Redis
+            fn: Optional callable to convert the data back to desired format
+            
+        Returns:
+            The data from Redis, optionally converted using fn
+        """
+        data = self._redis.get(key)
+        if data is None:
+            return None
+        if fn is not None:
+            return fn(data)
+        return data
+    
+    def get_str(self, key: str) -> Optional[str]:
+        """
+        Get data from Redis and convert to string
+        
+        Args:
+            key: The key to retrieve from Redis
+            
+        Returns:
+            The data as a UTF-8 decoded string, or None if key doesn't exist
+        """
+        return self.get(key, fn=lambda d: d.decode("utf-8"))
+    
+    def get_int(self, key: str) -> Optional[int]:
+        """
+        Get data from Redis and convert to integer
+        
+        Args:
+            key: The key to retrieve from Redis
+            
+        Returns:
+            The data as an integer, or None if key doesn't exist
+        """
+        return self.get(key, fn=int)
