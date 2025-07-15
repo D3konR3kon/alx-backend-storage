@@ -1,157 +1,116 @@
-#!/usr/bin/env python3
-"""
-Web page caching with Redis
-"""
-import redis
 import requests
-from typing import Callable
+import redis
 from functools import wraps
+from typing import Optional
 
-
-redis_client = redis.Redis()
-
-
-def url_access_count(method: Callable) -> Callable:
-    """
-    Decorator to count URL access and cache results with expiration
+class RedisCache:
+    """Wrapper class for Redis operations with error handling"""
     
-    Args:
-        method: The method to be decorated
-        
-    Returns:
-        The wrapped method that counts access and caches results
-    """
-    @wraps(method)
-    def wrapper(url: str) -> str:
-        """
-        Wrapper function that counts URL access and handles caching
-        """
+    def __init__(self):
+        self.redis_client = self._connect_to_redis()
+    
+    def _connect_to_redis(self) -> Optional[redis.Redis]:
+        """Attempt to connect to Redis with error handling"""
+        try:
+            return redis.Redis()
+        except redis.ConnectionError:
+            print("Warning: Could not connect to Redis server. Caching and tracking will be disabled.")
+            return None
+    
+    def get(self, key: str) -> Optional[str]:
+        """Safe get operation with error handling"""
+        if not self.redis_client:
+            return None
+        try:
+            return self.redis_client.get(key)
+        except redis.RedisError:
+            return None
+    
+    def setex(self, key: str, time: int, value: str) -> bool:
+        """Safe setex operation with error handling"""
+        if not self.redis_client:
+            return False
+        try:
+            return self.redis_client.setex(key, time, value)
+        except redis.RedisError:
+            return False
+    
+    def incr(self, key: str) -> Optional[int]:
+        """Safe increment operation with error handling"""
+        if not self.redis_client:
+            return None
+        try:
+            return self.redis_client.incr(key)
+        except redis.RedisError:
+            return None
 
-        count_key = f"count:{url}"
-        cache_key = f"cache:{url}"
 
-        redis_client.incr(count_key)
-        
+redis_cache = RedisCache()
 
-        cached_result = redis_client.get(cache_key)
-        if cached_result:
-            return cached_result.decode('utf-8')
-        
-
-        result = method(url)
-        
-
-        redis_client.setex(cache_key, 10, result)
-        
-        return result
-    return wrapper
-
-
-@url_access_count
 def get_page(url: str) -> str:
     """
-    Get HTML content of a URL with caching and access counting
+    Fetches HTML content of a URL, tracks access count, and caches results.
     
     Args:
-        url: The URL to fetch
+        url: The URL to fetch content from
         
     Returns:
-        The HTML content of the page
+        The HTML content of the URL
     """
-    response = requests.get(url)
-    return response.text
-
-
-
-def get_page_no_decorator(url: str) -> str:
-    """
-    Get HTML content of a URL with caching and access counting (no decorator)
-    
-    Args:
-        url: The URL to fetch
-        
-    Returns:
-        The HTML content of the page
-    """
-
-    count_key = f"count:{url}"
     cache_key = f"cache:{url}"
+    cached_content = redis_cache.get(cache_key)
     
-    redis_client.incr(count_key)
-    
-    cached_result = redis_client.get(cache_key)
-    if cached_result:
-        return cached_result.decode('utf-8')
+    if cached_content:
+        return cached_content.decode('utf-8')
     
     response = requests.get(url)
-    result = response.text
+    html_content = response.text
     
-    redis_client.setex(cache_key, 10, result)
+    redis_cache.setex(cache_key, 10, html_content)
     
-    return result
-
-
-def get_url_access_count(url: str) -> int:
-    """
-    Get the number of times a URL has been accessed
+    count_key = f"count:{url}"
+    redis_cache.incr(count_key)
     
-    Args:
-        url: The URL to check
-        
-    Returns:
-        The number of times the URL has been accessed
-    """
-    count = redis_client.get(f"count:{url}")
-    return int(count) if count else 0
+    return html_content
 
-
-def clear_url_cache(url: str) -> None:
+# Bonus: Decorator implementation
+def cache_with_access_tracking(expiration: int = 10):
     """
-    Clear the cache for a specific URL
+    Decorator to cache function results with access tracking.
     
     Args:
-        url: The URL to clear from cache
+        expiration: Cache expiration time in seconds
     """
-    redis_client.delete(f"cache:{url}")
-
-
-def clear_all_cache() -> None:
-    """
-    Clear all cached URLs and counts
-    """
-    redis_client.flushdb()
-
+    def decorator(func):
+        @wraps(func)
+        def wrapper(url: str) -> str:
+            cache_key = f"decorator_cache:{url}"
+            cached_content = redis_cache.get(cache_key)
+            
+            if cached_content:
+                return cached_content.decode('utf-8')
+            
+            result = func(url)
+            redis_cache.setex(cache_key, expiration, result)
+ 
+            count_key = f"decorator_count:{url}"
+            redis_cache.incr(count_key)
+            
+            return result
+        return wrapper
+    return decorator
 
 if __name__ == "__main__":
-
-    import time
-    
-    print("Testing get_page function with caching...")
-    
-    slow_url = "http://slowwly.robertomurray.co.uk/delay/2000/url/http://www.google.com"
-    
-    print(f"First request to {slow_url}...")
-    start_time = time.time()
-    result1 = get_page(slow_url)
-    end_time = time.time()
-    print(f"First request took {end_time - start_time:.2f} seconds")
-    print(f"Access count: {get_url_access_count(slow_url)}")
-    
-    print(f"\nSecond request to {slow_url} (should be cached)...")
-    start_time = time.time()
-    result2 = get_page(slow_url)
-    end_time = time.time()
-    print(f"Second request took {end_time - start_time:.2f} seconds")
-    print(f"Access count: {get_url_access_count(slow_url)}")
-    
-    print(f"\nResults are identical: {result1 == result2}")
-    
-    print("\nWaiting 11 seconds for cache to expire...")
-    time.sleep(11)
-    
-    print(f"Third request to {slow_url} (cache should be expired)...")
-    start_time = time.time()
-    result3 = get_page(slow_url)
-    end_time = time.time()
-    print(f"Third request took {end_time - start_time:.2f} seconds")
-    print(f"Access count: {get_url_access_count(slow_url)}")
+    try:
+      
+        test_url = "http://slowwly.robertomurray.co.uk"
+        print("Fetching content (first time - should be slow)...")
+        content = get_page(test_url)
+        print(f"Got content of length: {len(content)}")
+        
+        print("Fetching again (should be fast from cache)...")
+        content = get_page(test_url)
+        print(f"Got content of length: {len(content)}")
+        
+    except requests.RequestException as e:
+        print(f"Error fetching URL: {e}")
