@@ -7,7 +7,7 @@ import requests
 from typing import Callable
 from functools import wraps
 
-redis_client = redis.Redis()
+redis_client = redis.Redis(decode_responses=True)
 
 def url_access_count(method: Callable) -> Callable:
     """
@@ -28,14 +28,16 @@ def url_access_count(method: Callable) -> Callable:
         count_key = f"count:{url}"
         cache_key = f"cache:{url}"
 
+        # Increment access count
         redis_client.incr(count_key)
 
+        # Check for cached result
         cached_result = redis_client.get(cache_key)
         if cached_result:
-            return cached_result.decode('utf-8')
+            return cached_result
 
+        # Get fresh result and cache it
         result = method(url)
-
         redis_client.setex(cache_key, 10, result)
 
         return result
@@ -57,7 +59,6 @@ def get_page(url: str) -> str:
     return response.text
 
 
-
 def get_page_no_decorator(url: str) -> str:
     """
     Get HTML content of a URL with caching and access counting (no decorator)
@@ -72,15 +73,17 @@ def get_page_no_decorator(url: str) -> str:
     count_key = f"count:{url}"
     cache_key = f"cache:{url}"
 
+    # Increment access count
     redis_client.incr(count_key)
 
+    # Check for cached result
     cached_result = redis_client.get(cache_key)
     if cached_result:
-        return cached_result.decode('utf-8')
+        return cached_result
 
+    # Get fresh result and cache it
     response = requests.get(url)
     result = response.text
-
     redis_client.setex(cache_key, 10, result)
 
     return result
